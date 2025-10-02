@@ -102,7 +102,7 @@ population <- population |> ## Use janitor row to names function
                                TRUE ~ state_abb))   # use case_when to add abbreviations for DC and PR
 
   
-population
+head(population)
 
 ```
 
@@ -177,7 +177,7 @@ cases_clean <- cases_raw |>
          cases = as.numeric(new_cases)) |>  # made cases numeric
  select(state, date, cases) # only selected 3 columns
 
-
+head(cases_clean)
 ```
 
 
