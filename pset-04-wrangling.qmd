@@ -17,6 +17,8 @@ Write a first line of code for your problem set that defines `census_key` by run
 
 ```{r}
 ## Your code here
+census_key <- source("census-key.R")
+
 ```
 
 2. The [US Census API User Guide](https://www.census.gov/content/dam/Census/data/developers/api-user-guide/api-user-guide.pdf)
@@ -25,6 +27,7 @@ provides details on how to leverage this valuable resource. We are interested in
 
 ```{r}
 url <- "https://api.census.gov/data/2021/pep/population"
+
 ```
 
 Use the **httr2** package to construct the following GET request.
@@ -33,6 +36,7 @@ Use the **httr2** package to construct the following GET request.
 https://api.census.gov/data/2021/pep/population?get=POP_2020,POP_2021,NAME&for=state:*&key=YOURKEYHERE
 ```
 
+
 Create an object called `request` of class `httr2_request` with this URL as an endpoint.
 Hint: Print out `request` to check that the URL matches what we want.
 
@@ -40,27 +44,36 @@ Hint: Print out `request` to check that the URL matches what we want.
 #| message: false
 #| warning: false
 library(httr2)
-#request <- 
+request <- request(url) |> 
+  req_url_query(
+    get = "POP_2020,POP_2021,NAME",
+    `for` = "state:*",
+    key = census_key$value
+  )
 ```
 
 3. Make a request to the US Census API using the `request` object. Save the response to and object named `response`. Check the response status of your request and make sure it was successful. You can learn about _status codes_ [here](https://en.wikipedia.org/wiki/List_of_HTTP_status_codes).
 
 
 ```{r}
-#response <- 
+response <- request |> 
+  req_perform()
+
+response$status_code # successful code is 200
 ```
 
 4. Use a function from the **httr2** package to determine the content type of your response.
 
 ```{r}
 # Your code here
+resp_content_type(response)
 ```
 
 5. Use just one line of code and one function to extract the data into a matrix. 
 Hints: 1) Use the `resp_body_json` function. 2) The first row of the matrix will be the variable names and this OK as we will fix in the next exercise.
 
 ```{r}
-#population <- 
+population <-resp_body_json(response, simplifyVector = TRUE)
 ```
 
 6. Examine the `population` matrix you just created. Notice that 1) it is not tidy, 2) the column types are not what we want, and 3) the first row is a header. Convert `population` to a tidy dataset. Remove the state ID column and change the name of the column with state names to `state_name`. Add a column with state abbreviations called `state`. Make sure you assign the abbreviations for DC and PR correctly. Hint: Use the **janitor** package to make the first row the header. 
@@ -70,26 +83,38 @@ Hints: 1) Use the `resp_body_json` function. 2) The first row of the matrix will
 #| warning: false
 library(tidyverse)
 library(janitor)
-#population <- population |> ## Use janitor row to names function
-  # convert to tibble
-  # remove stat column
-  # rename state column to state_name
-  # use pivot_longer to tidy
-  # remove POP_ from year
-  # parese all relevant colunns to numeric
-  # add state abbreviations using state.abb variable
-  # use case_when to add abbreviations for DC and PR
+population <- population |> ## Use janitor row to names function
+  as_tibble() |> # convert to tibble
+  select(-V4) |> # remove stat column
+  rename(state_name = V3) |> # rename state column to state_name
+  pivot_longer(cols = c(V1, V2),
+               names_to = "year",
+               values_to = "population") |>  # use pivot_longer to tidy
+  mutate(year = recode(year,
+                  V1 = 2020,
+                  V2 = 2021)) |>
+  filter(state_name != "NAME") |> # remove POP_ from year
+  mutate(population = as.numeric(population), # parese all relevant colunns to numeric
+         state_abb = state.abb[match(state_name, state.name)] # add state abbreviations using state.abb variable
+         ) |> 
+  mutate(state_abb = case_when(state_name == "District of Columbia" ~ "DC",
+                               state_name == "Puerto Rico" ~ "PR",
+                               TRUE ~ state_abb))   # use case_when to add abbreviations for DC and PR
+
+  
+population
+
 ```
 
 7. As a check, make a barplot of states' 2021 and 2022 populations. Show the state names in the y-axis ordered by population size.  Hint: You will need to use `reorder` and use `facet_wrap`.
 
-```{r}
-# population |> 
-  # reorder state
-  # assign aesthetic mapping
-  # use geom_col to plot barplot
-  # flip coordinates
-  # facet by year
+```{r fig.height = 7}
+population |> 
+  mutate(state_name = reorder(state_name, population)) |> # reorder state
+  ggplot(aes(x = state_name, y = population)) + # assign aesthetic mapping
+  geom_col() + # use geom_col to plot barplot
+  coord_flip() + # flip coordinates
+  facet_wrap(~year)# facet by year
 ```
 
 
@@ -107,14 +132,19 @@ points to a JSON file that lists the states in the 10 Public Health Service (PHS
 library(jsonlite)
 library(purrr)
 url <- "https://github.com/datasciencelabs/2025/raw/refs/heads/main/data/regions.json"
-# regions <- use jsonlit JSON parser 
-# regions <- convert list to data frame. You can use map_df in purrr package 
+regions <- fromJSON(url, simplifyDataFrame = FALSE) # changes from DF to list 
+regions_df <- regions |> 
+  map_df(~ as_tibble(.x)) |> # convert list to data frame. You can use map_df in purrr package 
+  mutate(region_name = recode(region_name, # renaming long region to shorter
+                             "New York and New Jersey, Puerto Rico, Virgin Islands" = "other")) |> 
+  rename(state_name = states) # renaming col name for easier merging
 ```
 
 9. Add a region and region name columns to the `population` data frame.
 
 ```{r}
-# population <- 
+population <- left_join(population, regions_df, by = "state_name") # used left join to keep population columns
+
 ```
 
 
@@ -123,8 +153,13 @@ url <- "https://github.com/datasciencelabs/2025/raw/refs/heads/main/data/regions
 
 ```{r}
 api <- "https://data.cdc.gov/resource/pwn4-m3yp.json"
-# cases_raw <- 
+cases_raw <- request(api) |>  
+   req_perform() |>  
+   resp_body_json(simplifyDataFrame = TRUE) 
+
 ```
+**Yes, there is data because we flattened the first level using simplifyDataFrame = TRUE. This allows the nested data to appear as a list-column rather than separate rows or column**
+
 
 We see exactly 1,000 rows. We should be seeing over $52 \times 3$ rows per state.
 
@@ -132,14 +167,37 @@ We see exactly 1,000 rows. We should be seeing over $52 \times 3$ rows per state
 
 ```{r}
 api <- "https://data.cdc.gov/resource/pwn4-m3yp.json"
-# cases_raw <- 
+cases_raw <- request(api) |> 
+  req_url_query(.multi = "comma", `$limit` = "10000000000") |> # increase limit 
+  req_perform()|> # perform a request
+  resp_body_json(simplifyDataFrame = TRUE)  # we use the fromJSON function from the jsonlite package
+
+cases_clean <- cases_raw |>
+  mutate(date = as.Date(end_date), # changed date to ISO-8601 format
+         cases = as.numeric(new_cases)) |>  # made cases numeric
+ select(state, date, cases) # only selected 3 columns
+
+
 ```
 
 
 12. For 2020 and 2021, make a time series plot of cases per 100,000 versus time for each state. Stratify the plot by region name. Make sure to label you graph appropriately. 
 
 ```{r}
-#cases |> 
+cases_clean |> 
+  rename(state_abb = state) |>  # renamed for ease of merging for regions
+  left_join(population, by = "state_abb") |> 
+  rename(state = state_abb) |> 
+  filter(!is.na(region_name)) |> # removing states not in regions
+  mutate(cases_per_100 = 100000 * cases / population) |>  # making cases per 100000
+  ggplot(aes(x=date, y = cases, col = state)) +
+  geom_line() +
+  labs(
+    x = "time",
+    y = "Cases per 100,000",
+    title = "Cases over time for each State"
+  ) + 
+  facet_wrap(~ region_name) # stratify by region name
 ```
 
 13. The dates in the `cases` dataset are stored as character strings. Use the **lubridate** package to properly parse the `date` column, then create a summary table showing the total COVID-19 cases by month and year for 2020 and 2021. The table should have columns for year, month (as month name), and total cases across all states. Order by year and month. Use the **knitr** package and `kable()` function to display the results as a formatted table.
