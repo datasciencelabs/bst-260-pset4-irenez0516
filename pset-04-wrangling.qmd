@@ -188,22 +188,34 @@ cases_clean |>
   rename(state_abb = state) |>  # renamed for ease of merging for regions
   left_join(population, by = "state_abb") |> 
   rename(state = state_abb) |> 
-  filter(!is.na(region_name)) |> # removing states not in regions
+  filter(!is.na(region_name),
+         date >= as.Date("2020-01-01") & date <= as.Date("2021-12-31")) |> # removing states not in regions
   mutate(cases_per_100 = 100000 * cases / population) |>  # making cases per 100000
-  ggplot(aes(x=date, y = cases, col = state)) +
+  ggplot(aes(x=date, y = cases_per_100, col = state)) +
   geom_line() +
   labs(
     x = "time",
     y = "Cases per 100,000",
     title = "Cases over time for each State"
   ) + 
-  facet_wrap(~ region_name) # stratify by region name
+  facet_wrap(~ region_name, ncol = 2) # stratify by region name
 ```
 
 13. The dates in the `cases` dataset are stored as character strings. Use the **lubridate** package to properly parse the `date` column, then create a summary table showing the total COVID-19 cases by month and year for 2020 and 2021. The table should have columns for year, month (as month name), and total cases across all states. Order by year and month. Use the **knitr** package and `kable()` function to display the results as a formatted table.
 
 ```{r}
-#cases |> 
+library(lubridate)
+library(knitr)
+cases_clean |> 
+  filter(date >= as.Date("2020-01-01") & date <= as.Date("2021-12-31")) |> 
+  mutate(
+    Year = year(date),
+    Month = lubridate::month(date, label = TRUE, abbr = FALSE), 
+    day = day(date)
+  ) |> 
+  group_by(Year, Month) |> 
+  summarise("Total COVID-19 Cases" = sum(cases)) |> 
+  kable()
 ```
 
 14. The following URL provides additional COVID-19 data from the CDC in JSON format:
@@ -217,10 +229,36 @@ Use **httr2** to download COVID-19 death data from this endpoint. Make sure to r
 
 ```{r}
 # Your code here
+covid_cases <- request(deaths_url) |> 
+  req_url_query(.multi = "comma", `$limit` = "10000000000") |> # increase limit 
+  req_perform()|> # perform a request
+  resp_body_json(simplifyDataFrame = TRUE)  # we use the fromJSON function from the jsonlite package
+
+covid_cases_clean <- covid_cases |> 
+  mutate(date = as.Date(end_date), # changed date to ISO-8601 format
+         deaths = as.numeric(covid_19_deaths)) |>  # made cases numeric
+ select(state, date, deaths) |> # only selected 3 columns
+  filter(state %in% population$state_name, # removing UNITED STATES and NYC
+         !is.na(deaths)) # removing death = NA
+head(covid_cases_clean)
 ```
 
 15. Using the `deaths` dataset you created, make a bar plot showing the total COVID-19 deaths by state. Show only the top 10 states with the highest death counts. Order the bars from highest to lowest and use appropriate labels and title.
 
 ```{r}
 # Your code here
+covid_cases_clean |> 
+  group_by(state) |> 
+  summarise(total_case = sum(deaths)) |> 
+  arrange(desc(total_case)) |> 
+  head(n = 10) |> 
+  ggplot(aes(x = reorder(state, total_case), y = total_case)) + 
+  geom_col() +
+  coord_flip() +
+  labs(
+    x = "Total COVID-19 deaths",
+    y = "State",
+    title = "Top 10 States with Highest COVID Death Counts"
+  )
+  
 ```
